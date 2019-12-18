@@ -4,36 +4,48 @@ output: html_document
 ---
 
 ```{r}
-#install.packages("sparklyr")
-#spark_versions()%>%View
-```
-
-```{r}
-#spark_install(version = "2.4.3")
-#install.packages(c("nycflights13", "Lahman"))
-```
-
-
-```{r}
+library(tidyverse)
+#devtools::install_github("rstudio/sparklyr")
 library(sparklyr)
+```
+
+Which versions are available for download?
+
+```{r}
+spark_versions()%>%arrange(spark)%>%tail
+```
+
+Install Spark and NYC Flights
+
+```{r}
+#spark_install(version = "2.4.4")
+#install.packages("nycflights13")
+```
+
+Connect with local Spark
+
+```{r}
 sc <- spark_connect(master = "local")
 ```
 
+Loads table into Spark 
+
 ```{r}
-library(dplyr)
-iris_tbl <- copy_to(sc, iris)
 flights_tbl <- copy_to(sc, nycflights13::flights, "flights")
-batting_tbl <- copy_to(sc, Lahman::Batting, "batting")
 src_tbls(sc)
 ```
 
-```{r}
-flights_tbl %>% filter(dep_delay == 2)
-```
+Use sdf_nrow() to count rows
 
 ```{r}
 flights_tbl %>% sparklyr::sdf_nrow()
 ```
+
+```{r}
+flights_tbl %>% filter(dep_delay == 2) %>% sdf_nrow()
+```
+
+Run group by and filter
 
 ```{r}
 delay <- flights_tbl %>% 
@@ -43,15 +55,56 @@ delay <- flights_tbl %>%
   collect
 ```
 
+Write out as csv
+
 ```{r}
-# plot delays
-library(ggplot2)
-ggplot(delay, aes(dist, delay)) +
+csv_dir <- "flights_csv"
+spark_write_csv(flights_tbl, csv_dir)
+#iris_csv_tbl <- spark_read_csv(sc, "iris_csv", temp_csv)
+```
+
+Read it
+
+```{r}
+spark_read_csv(sc, "flights_csv", csv_dir)
+```
+
+Or as parquet
+
+```{r}
+parquet_dir <- "flights_parquet"
+spark_write_parquet(flights_tbl, parquet_dir)
+#iris_csv_tbl <- spark_read_csv(sc, "iris_csv", temp_csv)
+```
+
+Simulate a large file (13 regions)
+
+```{r}
+samples <- 10e7
+df_nf13 <- tibble(buying_region=sample.int(13,samples,replace=T),
+                  selling_region=sample.int(13,samples,replace=T),
+                  value=10^runif(samples,3,7))
+```
+
+```{r}
+nf13_tbl <- copy_to(sc, df_nf13, "nf13")
+```
+
+
+```{r}
+spark_write_csv(nf13_tbl, "nf13_csv")
+```
+
+
+Plot Delays
+
+```{r}
+delay %>%
+  ggplot(aes(dist, delay)) +
   geom_point(aes(size = count), alpha = 1/2) +
   geom_smooth() +
   scale_size_area(max_size = 2)
 ```
-
 
 ```{r}
 sparklyr::spark_disconnect(sc)
