@@ -1,0 +1,99 @@
+---
+title: "R Notebook"
+output: html_document
+---
+
+```{r}
+g_csv_generate <- F # mude para T para gerar o csv de 200M de linhas
+g_fname <- "nf_13.csv"
+```
+
+```{r}
+#install.packages("disk.frame")
+library(tidyverse)
+library(disk.frame)
+library(tictoc)
+```
+
+Simulate a large file (13 regions)
+
+```{r}
+if(g_csv_generate) {
+  samples <- 10e6 # 10 x 10^6 = 10M
+  df_nf13 <- tibble(buying_region=sample.int(13,samples,replace=T),
+                    selling_region=sample.int(13,samples,replace=T),
+                    value=10^rnorm(samples,mean=4,sd=2))
+  glimpse(df_nf13)
+}
+```
+
+Make file w/ 200M lines
+
+```{r}
+if(g_csv_generate) {
+  if (fs::file_exists(g_fname))
+    fs::file_delete(g_fname)
+  # first without append so column names show up
+  write_csv(df_nf13,"nf_13.csv",append=F)
+  walk(1:19,~{print(.x);write_csv(df_nf13,"nf_13.csv",append=T)})
+}
+```
+
+Sets up disk.frame
+
+```{r}
+setup_disk.frame()
+options(future.globals.maxSize = Inf)
+```
+
+Read from CSV, save as distributed disk frame
+
+```{r}
+tic()
+tmpdf <- tempfile(fileext = ".df")
+df <- csv_to_disk.frame(g_fname, outdir = tmpdf,overwrite = TRUE)
+toc()
+```
+Conta linhas x colunas
+
+```{r}
+df %>% nrow
+df %>% ncol
+```
+
+Sumariza pelas duas primeiras colunas 
+
+```{r}
+tic()
+df_grouped <- df %>%
+  disk.frame::chunk_group_by(buying_region,selling_region) %>%
+  chunk_summarize(value=sum(value)) %>%
+  collect %>% 
+  ungroup %>%
+  # second round over chunks, normal dplyr
+  group_by(buying_region,selling_region) %>%
+  summarize(value=sum(value)) %>%
+  ungroup
+glimpse(df_grouped)
+toc()
+```
+
+Cria matrix 13 x 13
+
+```{r}
+df_mtx <- df_grouped %>%
+  ungroup() %>%
+  mutate_at(vars(selling_region,buying_region),
+            ~str_c("reg",.)) %>%
+  pivot_wider(id_cols=c("buying_region","selling_region"),
+              names_from=selling_region,values_from=value,
+              values_fn=~as.double)
+df_mtx
+```
+```{r}
+df_mtx %>% 
+write_csv("df_mtx.csv")
+```
+
+
+
